@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from ast_nodes import Program, TypeName
-from symbols import FunctionSymbol, SymbolKind
+from ast_nodes import Program, TypeName, IfStmt, VarDecl, WhileStmt, Block
+from symbols import FunctionSymbol, SymbolKind, Scope, Symbol
 from semantic_errors import SemanticError, SemanticErrorKind, SemanticDiagnostic
 
 
@@ -9,6 +9,7 @@ class NameResolver:
     def __init__(self):
         self.diagnostics = []
         self.functions = {}
+        self.scopes = []
 
     def resolve(self, program: Program) -> None:
         # 1. Colete todas as assinaturas de função.
@@ -18,9 +19,18 @@ class NameResolver:
         self.validate_main(program)
 
         # 3. Percorra os corpos em ordem, criando um escopo para cada bloco.
-        # 4. Anote declarações, usos e blocos na AST.
         for func in program.functions:
-            self.visit_function(func)
+            parameters = dict()
+            for param in func.parameters:
+                parameters[param.name] = Symbol(
+                    name=param.name,
+                    kind=SymbolKind.PARAMETER,
+                    type=param.type,
+                    declaration=param,
+                )
+            self.visit_block(func.body, None, parameters)
+        
+        # 4. Anote declarações, usos e blocos na AST.
 
         # 5. Acumule os diagnósticos desta passagem antes de lançar SemanticError.
         if self.diagnostics:
@@ -73,12 +83,50 @@ class NameResolver:
                     span=main_sym.declaration.span,
                 )
             )
-
+            
+    def visit_block(self, block, parent, parameters=None):
+        symbols = parameters.copy() if parameters else {}
+        # Visita cada declaração e expressão no bloco
+        for statement in block.statements:
+            if isinstance(statement, VarDecl):
+                # Verifica se a variável já foi declarada no escopo atual
+                if statement.name in symbols:
+                    self.diagnostics.append(
+                        SemanticDiagnostic(
+                            kind=SemanticErrorKind.DUPLICATE_VARIABLE,
+                            message=f"Variável '{statement.name}' já foi declarada neste escopo.",
+                            span=statement.span,
+                        )
+                    )
+                else:
+                    # Adiciona a variável ao escopo atual
+                    symbol = Symbol(
+                        name=statement.name,
+                        kind=SymbolKind.VARIABLE,
+                        type=statement.type,
+                        declaration=statement,
+                    )
+                    symbols[statement.name] = symbol
+                    statement.metadata["symbol"] = symbol
+                
+            
+        
+        # Cria um novo escopo para o bloco
+        new_scope = Scope(parent=parent, symbols=symbols)
+        self.scopes.append(new_scope)
+            
+        for statement in block.statements:
+            if isinstance(statement, Block):
+                self.visit_block(statement, new_scope)
+            if isinstance(statement, IfStmt):
+                self.visit_block(statement.then_block, new_scope)
+                if statement.else_block:
+                    self.visit_block(statement.else_block, new_scope)
+            if isinstance(statement, WhileStmt):
+                self.visit_block(statement.body, new_scope)
 
 
 """Construa escopos, símbolos e vínculos entre usos e declarações."""
 def resolve_names(program: Program) -> None:
     resolver = NameResolver()
     resolver.resolve(program)
-
-    #raise NotImplementedError("implemente a resolução de nomes")
