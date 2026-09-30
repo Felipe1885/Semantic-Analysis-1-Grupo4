@@ -1,6 +1,22 @@
 from __future__ import annotations
 
-from ast_nodes import Program, TypeName, IfStmt, VarDecl, WhileStmt, Block
+from ast_nodes import (
+    Assignment,
+    BinaryExpr,
+    Block,
+    CallExpr,
+    CallStmt,
+    Expr,
+    IdentifierExpr,
+    IfStmt,
+    PrintStmt,
+    Program,
+    ReturnStmt,
+    TypeName,
+    UnaryExpr,
+    VarDecl,
+    WhileStmt,
+)
 from symbols import FunctionSymbol, SymbolKind, Scope, Symbol
 from semantic_errors import SemanticError, SemanticErrorKind, SemanticDiagnostic
 
@@ -18,19 +34,31 @@ class NameResolver:
         # 2. Valide a existência e a assinatura de main.
         self.validate_main(program)
 
-        # 3. Percorra os corpos em ordem, criando um escopo para cada bloco.
+        # 3/4. Percorra os corpos em ordem, criando um escopo para cada bloco e anotando declarações, usos e blocos na AST.
         for func in program.functions:
-            parameters = dict()
+            parameters = {}
             for param in func.parameters:
-                parameters[param.name] = Symbol(
+                if param.name in parameters:
+                    self.diagnostics.append(
+                        SemanticDiagnostic(
+                            kind=SemanticErrorKind.DUPLICATE_DECLARATION,
+                            message=(
+                                f"Declaração duplicada de '{param.name}'."
+                            ),
+                            span=param.span,
+                        )
+                    )
+                    continue
+
+                symbol = Symbol(
                     name=param.name,
                     kind=SymbolKind.PARAMETER,
                     type=param.type,
                     declaration=param,
                 )
+                parameters[param.name] = symbol
+                param.metadata["symbol"] = symbol
             self.visit_block(func.body, None, parameters)
-        
-        # 4. Anote declarações, usos e blocos na AST.
 
         # 5. Acumule os diagnósticos desta passagem antes de lançar SemanticError.
         if self.diagnostics:
@@ -85,45 +113,124 @@ class NameResolver:
             )
             
     def visit_block(self, block, parent, parameters=None):
-        symbols = parameters.copy() if parameters else {}
-        # Visita cada declaração e expressão no bloco
+        scope = Scope(parent=parent)
+        self.scopes.append(scope)
+        block.metadata["scope"] = scope
+
+        if parameters:
+            scope.symbols.update(parameters)
+
         for statement in block.statements:
-            if isinstance(statement, VarDecl):
-                # Verifica se a variável já foi declarada no escopo atual
-                if statement.name in symbols:
-                    self.diagnostics.append(
-                        SemanticDiagnostic(
-                            kind=SemanticErrorKind.DUPLICATE_VARIABLE,
-                            message=f"Variável '{statement.name}' já foi declarada neste escopo.",
-                            span=statement.span,
-                        )
+            self.visit_statement(statement, scope)
+
+    def visit_statement(self, statement, scope):
+        if isinstance(statement, VarDecl):
+            symbol = scope.symbols.get(statement.name)
+            if symbol is not None:
+                self.diagnostics.append(
+                    SemanticDiagnostic(
+                        kind=SemanticErrorKind.DUPLICATE_DECLARATION,
+                        message=f"Declaração duplicada de '{statement.name}'.",
+                        span=statement.span,
                     )
-                else:
-                    # Adiciona a variável ao escopo atual
-                    symbol = Symbol(
-                        name=statement.name,
-                        kind=SymbolKind.VARIABLE,
-                        type=statement.type,
-                        declaration=statement,
+                )
+            else:
+                symbol = Symbol(
+                    name=statement.name,
+                    kind=SymbolKind.VARIABLE,
+                    type=statement.type,
+                    declaration=statement,
+                )
+                scope.symbols[statement.name] = symbol
+                statement.metadata["symbol"] = symbol
+
+            if statement.initializer is not None:
+                self.visit_expr(statement.initializer, scope)
+            return
+
+        if isinstance(statement, Assignment):
+            self.visit_expr(statement.target, scope)
+            self.visit_expr(statement.value, scope)
+            return
+
+        if isinstance(statement, CallStmt):
+            self.visit_expr(statement.call, scope)
+            return
+
+        if isinstance(statement, IfStmt):
+            self.visit_expr(statement.condition, scope)
+            self.visit_block(statement.then_block, scope)
+            if statement.else_block is not None:
+                self.visit_block(statement.else_block, scope)
+            return
+
+        if isinstance(statement, WhileStmt):
+            self.visit_expr(statement.condition, scope)
+            self.visit_block(statement.body, scope)
+            return
+
+        if isinstance(statement, ReturnStmt):
+            if statement.value is not None:
+                self.visit_expr(statement.value, scope)
+            return
+
+        if isinstance(statement, PrintStmt):
+            for item in statement.items:
+                if isinstance(item, Expr):
+                    self.visit_expr(item, scope)
+            return
+
+        if isinstance(statement, Block):
+            self.visit_block(statement, scope)
+
+    def visit_expr(self, expression, scope):
+        if isinstance(expression, IdentifierExpr):
+            symbol = self.lookup_variable(expression.name, scope)
+            if symbol is None:
+                self.diagnostics.append(
+                    SemanticDiagnostic(
+                        kind=SemanticErrorKind.UNDECLARED_VARIABLE,
+                        message=f"Variável '{expression.name}' não foi declarada.",
+                        span=expression.span,
                     )
-                    symbols[statement.name] = symbol
-                    statement.metadata["symbol"] = symbol
-                
-            
-        
-        # Cria um novo escopo para o bloco
-        new_scope = Scope(parent=parent, symbols=symbols)
-        self.scopes.append(new_scope)
-            
-        for statement in block.statements:
-            if isinstance(statement, Block):
-                self.visit_block(statement, new_scope)
-            if isinstance(statement, IfStmt):
-                self.visit_block(statement.then_block, new_scope)
-                if statement.else_block:
-                    self.visit_block(statement.else_block, new_scope)
-            if isinstance(statement, WhileStmt):
-                self.visit_block(statement.body, new_scope)
+                )
+            else:
+                expression.metadata["symbol"] = symbol
+            return
+
+        if isinstance(expression, CallExpr):
+            symbol = self.functions.get(expression.name)
+            if symbol is None:
+                self.diagnostics.append(
+                    SemanticDiagnostic(
+                        kind=SemanticErrorKind.UNDECLARED_FUNCTION,
+                        message=f"Função '{expression.name}' não foi declarada.",
+                        span=expression.span,
+                    )
+                )
+            else:
+                expression.metadata["symbol"] = symbol
+
+            for argument in expression.arguments:
+                self.visit_expr(argument, scope)
+            return
+
+        if isinstance(expression, BinaryExpr):
+            self.visit_expr(expression.left, scope)
+            self.visit_expr(expression.right, scope)
+            return
+
+        if isinstance(expression, UnaryExpr):
+            self.visit_expr(expression.operand, scope)
+
+    def lookup_variable(self, name, scope):
+        current = scope
+        while current is not None:
+            symbol = current.symbols.get(name)
+            if symbol is not None:
+                return symbol
+            current = current.parent
+        return None
 
 
 """Construa escopos, símbolos e vínculos entre usos e declarações."""

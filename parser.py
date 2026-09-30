@@ -238,12 +238,20 @@ class Parser:
             arguments = self.parse_arguments()
             self.expect(TokenKind.RIGHT_PAREN)
             end = self.expect(TokenKind.SEMICOLON)
-            return CallStmt(arguments, span=self._span(start, end))
+            call = CallExpr(
+                start.lexeme,
+                arguments,
+                span=self._span(start, end),
+            )
+            return CallStmt(call, span=self._span(start, end))
         if self.match(TokenKind.ASSIGN):
             expression = self.parse_expression()
             end = self.expect(TokenKind.SEMICOLON)
             return Assignment(
-                target=start.lexeme,
+                target=IdentifierExpr(
+                    start.lexeme,
+                    span=self._token_span(start),
+                ),
                 value=expression,
                 span=self._span(start, end)
             )
@@ -483,7 +491,7 @@ class Parser:
         if (self.match(TokenKind.LEFT_PAREN)):
             expression = self.parse_expression()
             self.expect(TokenKind.RIGHT_PAREN)
-            return Expr(value=expression, span=self._span(start, expression))
+            return expression
         if (self.match(TokenKind.IDENTIFIER)):
             if self.match(TokenKind.LEFT_PAREN):
                 arguments = self.parse_arguments()
