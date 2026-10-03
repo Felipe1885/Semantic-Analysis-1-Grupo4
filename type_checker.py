@@ -18,7 +18,15 @@ class TypeChecker:
 
     def visit_statement(self, stmt):
         if isinstance(stmt, VarDecl):
-            if stmt.initializer is not None:
+            if stmt.type == TypeName.VOID:
+                self.diagnostics.append(
+                    SemanticDiagnostic(
+                        kind=SemanticErrorKind.VOID_VARIABLE,
+                        message=f"Variável '{stmt.name}' não pode ser declarada com tipo 'void'.",
+                        span=stmt.span,
+                    )
+                )
+            elif stmt.initializer is not None:
                 initializer_type = self.visit_expr(stmt.initializer)
                 if initializer_type is not None:
                     if initializer_type == TypeName.VOID:
@@ -110,6 +118,14 @@ class TypeChecker:
 
     def visit_expr(self, expr):
         if isinstance(expr, IntLiteral):
+            if expr.value > 9223372036854775807:
+                self.diagnostics.append(
+                    SemanticDiagnostic(
+                        kind=SemanticErrorKind.INTEGER_LITERAL_OUT_OF_RANGE,
+                        message=f"Literal inteiro '{expr.value}' está fora do intervalo permitido.",
+                        span=expr.span,
+                    )
+                )
             expr.metadata["type"] = TypeName.INT
             return TypeName.INT
 
@@ -163,7 +179,7 @@ class TypeChecker:
             left_type = self.visit_expr(expr.left)
             right_type = self.visit_expr(expr.right)
 
-            if BinaryExpr.operator in [BinaryOperator.ADD, BinaryOperator.SUBTRACT, BinaryOperator.MULTIPLY, BinaryOperator.DIVIDE, BinaryOperator.REMAINDER]:
+            if expr.operator in [BinaryOperator.ADD, BinaryOperator.SUBTRACT, BinaryOperator.MULTIPLY, BinaryOperator.DIVIDE, BinaryOperator.REMAINDER]:
                 if left_type != TypeName.INT or right_type != TypeName.INT:
                     self.diagnostics.append(
                         SemanticDiagnostic(
@@ -175,7 +191,7 @@ class TypeChecker:
                 expr.metadata["type"] = TypeName.INT
                 return TypeName.INT
             
-            elif BinaryExpr.operator in [BinaryOperator.LESS, BinaryOperator.LESS_EQUAL, BinaryOperator.GREATER, BinaryOperator.GREATER_EQUAL]:
+            elif expr.operator in [BinaryOperator.LESS, BinaryOperator.LESS_EQUAL, BinaryOperator.GREATER, BinaryOperator.GREATER_EQUAL]:
                 if left_type != TypeName.INT or right_type != TypeName.INT:
                     self.diagnostics.append(
                         SemanticDiagnostic(
@@ -187,7 +203,7 @@ class TypeChecker:
                 expr.metadata["type"] = TypeName.BOOL
                 return TypeName.BOOL
             
-            elif BinaryExpr.operator in [BinaryOperator.EQUAL, BinaryOperator.NOT_EQUAL]:
+            elif expr.operator in [BinaryOperator.EQUAL, BinaryOperator.NOT_EQUAL]:
                 if left_type != right_type:
                     self.diagnostics.append(
                         SemanticDiagnostic(
@@ -199,7 +215,7 @@ class TypeChecker:
                 expr.metadata["type"] = TypeName.BOOL
                 return TypeName.BOOL
             
-            elif BinaryExpr.operator in [BinaryOperator.LOGICAL_AND, BinaryOperator.LOGICAL_OR]:
+            elif expr.operator in [BinaryOperator.LOGICAL_AND, BinaryOperator.LOGICAL_OR]:
                 if left_type != TypeName.BOOL or right_type != TypeName.BOOL:
                     self.diagnostics.append(
                         SemanticDiagnostic(
