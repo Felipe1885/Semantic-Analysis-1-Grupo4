@@ -10,6 +10,15 @@ class TypeChecker:
     def check(self, program: Program) -> None:
         for func in program.functions:
             self.current_function = func
+            for param in func.parameters:
+                if param.type == TypeName.VOID:
+                    self.diagnostics.append(
+                        SemanticDiagnostic(
+                            kind=SemanticErrorKind.VOID_PARAMETER,
+                            message=f"Parâmetro '{param.name}' não pode ser do tipo 'void'.",
+                            span=param.span,
+                        )
+                    )
             self.visit_block(func.body)
 
     def visit_block(self, block):
@@ -114,7 +123,6 @@ class TypeChecker:
                     )
                 )
             return
-
 
     def visit_expr(self, expr):
         if isinstance(expr, IntLiteral):
@@ -254,17 +262,10 @@ class TypeChecker:
                 expr.metadata["type"] = TypeName.BOOL
                 return TypeName.BOOL
 
-     
 
 def check_types(program: Program) -> None:
-    # 1. Use os símbolos anexados pela resolução de nomes.
-    # 2. Determine cada expressão de baixo para cima.
-    # 3. Valide operadores, chamadas, comandos e declarações.
-    # 4. Anote expressões válidas e acumule os diagnósticos da passagem.
     """Determine tipos de expressões e valide seus contextos."""
-
     checker = TypeChecker()
     checker.check(program)
     if checker.diagnostics:
         raise SemanticError(checker.diagnostics)
-    #raise NotImplementedError("implemente a verificação de tipos")
