@@ -38,6 +38,16 @@ class NameResolver:
         for func in program.functions:
             parameters = {}
             for param in func.parameters:
+
+                if param.type == TypeName.VOID:
+                    self.diagnostics.append(
+                        SemanticDiagnostic(
+                            kind=SemanticErrorKind.VOID_PARAMETER,
+                            message=f"Parâmetro '{param.name}' não pode ser do tipo 'void'.",
+                            span=param.span,
+                        )
+                    )
+
                 if param.name in parameters:
                     self.diagnostics.append(
                         SemanticDiagnostic(
